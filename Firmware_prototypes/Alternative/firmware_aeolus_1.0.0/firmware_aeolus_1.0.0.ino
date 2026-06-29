@@ -1,155 +1,291 @@
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
+//version 1.0.2 
+#include <WiFi.h> 
+#include <WiFiClientSecure.h> 
+#include <PubSubClient.h> 
+#include <Wire.h> 
+#include <Adafruit_Sensor.h> 
+#include <Adafruit_BME280.h> 
+#include <ArduinoJson.h> 
+#include "time.h" 
+// BME280 
+#define SDA_PIN 21 
+#define SCL_PIN 22 
+// MQ135 
+#define MQ135_PIN 35 
+// GP2Y1010 
+#define GP_LED 4 
+#define GP_OUTPUT 34 
+// WiFi 
+const char* ssid = "miwifi"; 
+const char* password = "mipassword"; 
+// MQTT 
+const char* mqttServer = "b58901c6.ala.us-east-1.emqxsl.com"; 
+const int mqttPort = 8883; 
+const char* mqttUser = "userNode1"; 
+const char* mqttPassword = "cqVC$#234"; 
+const char* mqttTopic = "calidad_aire/nodo1"; 
+// JSON 
+JsonDocument doc; 
+char payload[512]; 
+//objetos globales 
+WiFiClientSecure espClient; 
+PubSubClient mqtt(espClient); 
+Adafruit_BME280 bme; 
+//Variables Sensores 
+// BME280 
+float temperatura = 0; 
+float humedad = 0; 
+float presion = 0; 
+//nuevas variables 
+float co2 = 0; 
+float pm1 = 0; 
+float pm25 = 0; 
+float pm10 = 0; 
+// MQ135 
+int mq135ADC = 0; 
+float mq135Voltaje = 0; 
+// GP2Y1010 
+int gpADC = 0; 
+float gpVoltaje = 0; 
+//contador 
+uint32_t sequence = 0; 
+//temporizador envio 
+unsigned long previousMillis = 0; 
+const unsigned long publishInterval = 10000; 
+//muestras para PM media 
+const int GP_MUESTRAS = 20; 
+String chipID; 
+String nombreNodo = "Node1"; 
+time_t timestamp; 
+String obtenerChipID() 
+{ 
+  uint64_t chipid = ESP.getEfuseMac(); 
+  char id[17];
+  sprintf( id, "%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid ); 
+  return String(id); 
+} 
+//funcion conexion wifi y reconexion 
+void conectarWiFi() 
+{ 
+  Serial.print("Conectando WiFi"); 
+  WiFi.begin(ssid,password); 
+  while(WiFi.status()!=WL_CONNECTED) 
+  { 
+    delay(500); 
+    Serial.print("."); 
+  } 
+  Serial.println(); 
+  Serial.println("WiFi conectado"); 
+  Serial.print("IP: "); 
+  Serial.println(WiFi.localIP()); 
+} 
+void verificarWiFi() 
+{ 
+  if(WiFi.status()==WL_CONNECTED) 
+    return; 
+  Serial.println("WiFi perdido"); 
+  conectarWiFi(); 
+} 
+//conexion MQTT y reconexion 
+void conectarMQTT() 
+{ 
+  while(!mqtt.connected()) 
+  { 
+    Serial.print("Conectando MQTT..."); 
+    if( mqtt.connect( "ESP32_Node1", mqttUser, mqttPassword ) ) 
+    { 
+      Serial.println("OK"); 
+    } 
+    else 
+    { 
+      Serial.print("Error: "); 
+      Serial.println( mqtt.state() ); 
+      delay(3000); 
+    } 
+  } 
+} 
 
-#include <Wire.h>
+void verificarMQTT() 
+{ 
+  if(mqtt.connected()) 
+    return; 
+  conectarMQTT();
+} 
+//inicializacion sensores 
+bool iniciarBME() 
+{ 
+  Wire.begin( SDA_PIN, SCL_PIN ); 
+  if(!bme.begin(0x76)) 
+  { 
+    Serial.println(); 
+    Serial.println( "BME280 NO encontrado"); 
+    return false; 
+  } 
+  Serial.println( "BME280 encontrado"); 
+  return true; 
+} 
 
-#include <ArduinoJson.h>
+void iniciarGP2Y() 
+{ 
+  pinMode( GP_LED, OUTPUT ); 
+  digitalWrite( GP_LED, HIGH ); 
+} 
 
-#include <LittleFS.h>
+//funcion imprimir estado del nodo 
+void imprimirEstado() 
+{ 
+  Serial.println(); 
+  Serial.println( "===== Nodo IoT ====="); 
+  Serial.print("IP: "); 
+  Serial.println( WiFi.localIP() ); 
+  Serial.print("MQTT: "); 
+  Serial.println( mqtt.connected() ); 
+  Serial.print("Secuencia: "); 
+  Serial.println(sequence); 
+  Serial.println( "===================="); 
+} 
 
-#include <Adafruit_PM25AQI.h>
+//lecturas de sensores 
+void leerBME280() 
+{ 
+  temperatura = bme.readTemperature(); 
+  humedad = bme.readHumidity(); 
+  presion = bme.readPressure() / 100.0; 
+} 
 
-#include <SensirionI2cScd4x.h>
+void leerMQ135() 
+{ 
+  mq135ADC = analogRead(MQ135_PIN); 
+  mq135Voltaje = (mq135ADC / 4095.0) * 3.3; 
+} 
 
-#include "time.h"
+void leerGP2Y() 
+{ 
+  long suma = 0; 
+  for(int i = 0; i < GP_MUESTRAS; i++) 
+  { 
+    digitalWrite(GP_LED, LOW); 
+    delayMicroseconds(280); 
+    suma += analogRead(GP_OUTPUT); 
+    delayMicroseconds(40); 
+    digitalWrite(GP_LED, HIGH); 
+    delayMicroseconds(9680); 
+  } 
+  gpADC = suma / GP_MUESTRAS; 
+  gpVoltaje = (gpADC / 4095.0) * 3.3; 
+} 
 
-// Pines
-#define SDA_PIN     21
-#define SCL_PIN     22
+void procesarMediciones() 
+{ 
+  leerBME280(); 
+  leerMQ135(); 
+  leerGP2Y(); 
+  // Simulación temporal 
+  co2 = map( mq135ADC, 0, 4095, 400, 1800 ); 
+  pm25 = gpVoltaje * 100; 
+  pm10 = pm25 * 1.2; 
+  pm1 = pm25 * 0.6; 
+  //Obtener el timestamp 
+  timestamp = time(nullptr); 
+} 
+//crear json 
+void crearJSON() 
+{ 
+  doc.clear(); 
+  JsonObject dispositivo = doc["dispositivo"].to<JsonObject>(); 
+  dispositivo["id"] = chipID; 
+  dispositivo["nombre"]= nombreNodo; 
+  dispositivo["firmware"] = "1.0.2"; 
+  dispositivo["secuencia"] = sequence; 
+  if (timestamp > 100000000)
+  { 
+    dispositivo["upTime"] = timestamp; 
+  } 
+  JsonObject entorno = doc["entorno"].to<JsonObject>(); 
+  entorno["temperatura"] = temperatura; 
+  entorno["humedad"] = humedad;
+  JsonObject aire = doc["aire"].to<JsonObject>(); 
+  aire["co2"] = co2; 
+  aire["pm1_0"] = pm1; 
+  aire["pm2_5"] = pm25; 
+  aire["pm10"] = pm10; 
+  serializeJson(doc, payload); 
+} 
+//funcion de depuracion 
+void imprimirSensores() 
+{ 
+  Serial.println(); 
+  Serial.println("===== Sensores ====="); 
+  Serial.print("ChipID: "); 
+  Serial.println(chipID); 
+  Serial.print("uptime: "); 
+  Serial.println(timestamp); 
+  Serial.print("Temperatura: "); 
+  Serial.println(temperatura); 
+  Serial.print("Humedad: "); 
+  Serial.println(humedad); 
+  Serial.print("Presion: "); 
+  Serial.println(presion); 
+  Serial.print("MQ135 ADC: "); 
+  Serial.println(mq135ADC); 
+  Serial.print("GP2Y ADC: "); 
+  Serial.println(gpADC); 
+  Serial.println("co2: "); 
+  Serial.println (co2); 
+  Serial.println("pm1_0: "); 
+  Serial.println (pm1); 
+  Serial.println("pm2_5: "); 
+  Serial.println (pm25); 
+  Serial.println("pm10: "); 
+  Serial.println (pm10); 
+  Serial.println("===================="); 
+} 
+//publicar en Broker 
+void publicarDatos() 
+{ 
+  crearJSON(); 
+  if(mqtt.publish(mqttTopic, payload)) 
+  { 
+    Serial.println("Datos enviados"); 
+    Serial.println(payload); 
+    sequence++; 
+  } 
+  else 
+  { 
+    Serial.println("Error al publicar"); 
+  } 
+} 
 
-// WiFi
-const char* ssid = "miwifi";
-const char* password = "1234567";
-
-// MQTT
-const char* mqttServer ="b58901c6.ala.us-east-1.emqxsl.com";
-const int mqttPort = 8883;
-const char* mqttUser = "userNode1";
-const char* mqttPassword = "cqVC$#234";
-const char* mqttTopic ="calidad_aire/nodo1";
-
-// Tamaño de buffer MQTT (el default de PubSubClient es 256 bytes,
-// insuficiente para nuestro JSON de hasta 768 bytes)
-const uint16_t mqttBufferSize = 1024;
-
-// Objetos globales
-WiFiClientSecure espClient;
-PubSubClient mqtt(espClient);
-Adafruit_PM25AQI pmsa;
-SensirionI2cScd4x scd4x;
-JsonDocument doc;
-
-// Variables globales
-// Identificación del nodo
-String chipID;
-String nombreNodo = "Node1";
-const char* firmwareVersion = "2.1.0";
-
-// Estado de sensores
-enum EstadoSensor
-{
-    SENSOR_OK = 0,
-    SENSOR_NO_DETECTADO = 1,
-    SENSOR_ERROR_LECTURA = 2,
-    SENSOR_TIMEOUT = 3
-};
-
-uint8_t estadoSCD41 = SENSOR_NO_DETECTADO;
-uint8_t estadoPMSA003I = SENSOR_NO_DETECTADO;
-
-PM25_AQI_Data datosPM;
-
-// Variables de medición de sensores
-float temperatura = 0;
-float humedad = 0;
-uint16_t co2 = 0;
-uint16_t pm1 = 0;
-uint16_t pm25 = 0;
-uint16_t pm10 = 0;
-uint16_t particulas03 = 0;
-
-// Comunicacion con oled
-bool wifiOK = false;
-bool mqttOK = false;
-
-// Cola Offline
-bool offline = false;
-uint16_t colaPendiente = 0;
-const char* colaPath = "/cola.txt";
-const char* colaTmpPath = "/cola_tmp.txt";
-
-// Tiempo
-time_t timestamp = 0;
-uint32_t sequence = 0;
-
-// Publicacion
-unsigned long previousPublish = 0;
-const uint32_t publishInterval = 15000;
-unsigned long previousRecovery = 0;
-const uint32_t recoveryInterval = 3000;
-
-// JSON
-char payload[768];
-
-void setup()
-{
-    Serial.begin(115200);
-    delay(1000);
-
-    Serial.println();
-    Serial.println("========================");
-    Serial.println("Firmware 2.1.0");
-    Serial.println("========================");
-    
-    chipID = obtenerChipID();
-
-    iniciarI2C();
-    iniciarSCD41();
-    iniciarPMSA003I();
-
-    conectarWiFi();
-
-    configTime(
-        -4 * 3600,
-        0,
-        "pool.ntp.org",
-        "time.nist.gov"
-    );
-    delay(3000);
-
-    iniciarLittleFS();
-
-    espClient.setInsecure();
-
-    // Ampliamos el buffer de PubSubClient (default 256 bytes,
-    // insuficiente para nuestro JSON de hasta 768 bytes)
-    mqtt.setBufferSize(mqttBufferSize);
-    mqtt.setServer(mqttServer, mqttPort);
-
-    conectarMQTT();
-}
-
-void loop()
-{
-    verificarWiFi();
-    verificarMQTT();
-    mqtt.loop();
-
-    unsigned long ahora = millis();
-
-    // Reenvío de datos guardados durante cortes de conexión
-    if (ahora - previousRecovery >= recoveryInterval)
-    {
-        previousRecovery = ahora;
-        procesarCola();
-    }
-
-    if (ahora - previousPublish >= publishInterval)
-    {
-        previousPublish = ahora;
-        leerSensores();
-        imprimirSensores();
-        publicarMedicion();
-    }
+void setup() 
+{ 
+  Serial.begin(115200); 
+  chipID = obtenerChipID(); 
+  delay(1000); 
+  // 2. Configurar NTP (UTC-4 para Bolivia/Chile/etc.) 
+  configTime(-4 * 3600, 0, "pool.ntp.org"); 
+  // 3. Esperar brevemente a que el sistema se sincronice en segundo plano delay(2000); 
+  Serial.println(); 
+  Serial.println("======================"); 
+  Serial.println("Nodo Calidad Aire"); 
+  iniciarGP2Y(); 
+  iniciarBME(); 
+  conectarWiFi(); 
+  espClient.setInsecure();
+  mqtt.setServer( mqttServer, mqttPort ); 
+  conectarMQTT(); 
+  imprimirEstado(); 
+} 
+void loop() 
+{ 
+  verificarWiFi(); 
+  verificarMQTT(); 
+  mqtt.loop(); 
+  unsigned long currentMillis = millis(); 
+  if( currentMillis - previousMillis >= publishInterval ) 
+  { 
+    previousMillis = currentMillis; 
+    procesarMediciones(); 
+    imprimirSensores(); 
+    publicarDatos(); 
+  } 
 }

@@ -1,1123 +1,340 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
-
 #include <Wire.h>
-
 #include <ArduinoJson.h>
-
 #include <LittleFS.h>
-
 #include <Adafruit_PM25AQI.h>
-
 #include <SensirionI2cScd4x.h>
-
+#include <Adafruit_GFX.h>
+#include <Adafruit_SH110X.h> // Librería unificada para pantallas SH1106/SH110X
+#include <deque>
 #include "time.h"
 
 // ==================================================
-// PINES
+// PINES Y CONFIGURACIÓN HARDWARE
 // ==================================================
-
 #define SDA_PIN 21
 #define SCL_PIN 22
+#define BUTTON_PIN 13
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+#define OLED_ADDRESS  0x3C
 
 // ==================================================
-// WIFI
+// CONFIGURACIÓN DE RED Y MQTT
 // ==================================================
-
 const char* ssid = "miwifi";
-const char* password = "1223456";
-
-// ==================================================
-// MQTT / EMQX
-// ==================================================
+const char* password = "12345678";
 
 const char* mqttServer = "b58901c6.ala.us-east-1.emqxsl.com";
-
 const int mqttPort = 8883;
-
-const char* mqttUser = "userNode1";
-
-const char* mqttPassword = "cqVC$#234";
-
-const char* mqttTopic = "calidad_aire/nodo1";
-
-// Buffer MQTT
-const uint16_t mqttBufferSize = 1024;
+const char* mqttUser = "Node1";
+const char* mqttPassword = "12345678";
+const char* mqttTopic = "MedicionAire/nodo1";
 
 // ==================================================
-// OBJETOS GLOBALES
+// ESTRUCTURA DE DATOS INTER-TAREAS (FreeRTOS)
 // ==================================================
-
-WiFiClientSecure espClient;
-
-PubSubClient mqtt(espClient);
-
-Adafruit_PM25AQI pmsa;
-
-SensirionI2cScd4x scd4x;
-
-JsonDocument doc;
-
-// ==================================================
-// IDENTIFICACIÓN DEL NODO
-// ==================================================
-
-String chipID;
-
-String nombreNodo = "Node1";
-
-const char* firmwareVersion = "2.2.0";
-
-// ==================================================
-// ESTADO DE SENSORES
-// ==================================================
-
-enum EstadoSensor
-{
-    SENSOR_OK = 0,
-    SENSOR_NO_DETECTADO = 1,
-    SENSOR_ERROR_LECTURA = 2,
-    SENSOR_TIMEOUT = 3
+struct DatosLectura {
+    uint16_t co2;
+    float temperatura;
+    float humedad;
+    uint16_t pm1;
+    uint16_t pm25;
+    uint16_t pm10;
+    uint16_t particulas03;
+    uint8_t estadoSCD41;
+    uint8_t estadoPMSA003I;
+    time_t timestamp;
+    uint32_t secuencia;
 };
 
-uint8_t estadoSCD41 = SENSOR_NO_DETECTADO;
+// Queue de FreeRTOS para pasar datos entre el Core 1 y el Core 0
+QueueHandle_t colaFreeRTOS;
 
-uint8_t estadoPMSA003I = SENSOR_NO_DETECTADO;
+// Globales compartidas en el Core 1
+Adafruit_PM25AQI pmsa;
+SensirionI2cScd4x scd4x;
+Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
-PM25_AQI_Data datosPM;
+String chipID;
+const char* nombreNodo = "Node1";
+const char* firmwareVersion = "3.1.0-SH1106-FreeRTOS";
 
-// ==================================================
-// DATOS DE SENSORES
-// ==================================================
-
-float temperatura = 0;
-
-float humedad = 0;
-
-uint16_t co2 = 0;
-
-uint16_t pm1 = 0;
-
-uint16_t pm25 = 0;
-
-uint16_t pm10 = 0;
-
-uint16_t particulas03 = 0;
+// Control OLED
+bool oledEncendido = false;
+unsigned long tiempoEncendidoOLED = 0;
+const uint32_t duracionOLED = 10000; // 10 segundos activo
+unsigned long ultimoDebounce = 0;
 
 // ==================================================
-// ESTADO DE COMUNICACIONES
+// CONTROL PANTALLA OLED (SH1106)
 // ==================================================
+void apagarOLED() {
+    display.oled_command(SH110X_DISPLAYOFF);
+    oledEncendido = false;
+}
 
-bool wifiOK = false;
+void encenderOLED() {
+    display.oled_command(SH110X_DISPLAYON);
+    oledEncendido = true;
+    tiempoEncendidoOLED = millis();
+}
 
-bool mqttOK = false;
+void actualizarOLED(const DatosLectura& d) {
+    if (!oledEncendido) return;
 
-// ==================================================
-// COLA OFFLINE
-// ==================================================
-bool offline = false;
-uint16_t colaPendiente = 0;
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(SH110X_WHITE);
 
-const char* colaPath = "/cola.txt";
+    display.setCursor(0, 0);
+    display.println("--- CALIDAD DE AIRE ---");
 
-const char* colaTmpPath = "/cola_tmp.txt";
+    display.setCursor(0, 16);
+    display.print("CO2:   "); display.print(d.co2); display.println(" ppm");
 
-// ==================================================
-// TIEMPO
-// ==================================================
+    display.setCursor(0, 28);
+    display.print("Temp:  "); display.print(d.temperatura, 1); display.println(" C");
 
-time_t timestamp = 0;
+    display.setCursor(0, 40);
+    display.print("Hum:   "); display.print(d.humedad, 1); display.println(" %");
 
-uint32_t sequence = 0;
+    display.setCursor(0, 52);
+    display.print("PM2.5: "); display.print(d.pm25); display.println(" ug/m3");
 
-// ==================================================
-// TEMPORIZADORES
-// ==================================================
-
-unsigned long previousPublish = 0;
-
-const uint32_t publishInterval = 15000;
-
-unsigned long previousRecovery = 0;
-
-const uint32_t recoveryInterval = 3000;
-
-unsigned long previousMQTT = 0;
-
-const uint32_t mqttReconnectInterval = 5000;
+    display.display();
+}
 
 // ==================================================
-// JSON
+// TAREA 1: SENSORES, PANTALLA Y BOTÓN (CORE 1)
 // ==================================================
-
-char payload[768];
-
-// ==================================================
-// INICIALIZAR I2C
-// ==================================================
-
-void iniciarI2C()
-{
+void tareaSensores(void *pvParameters) {
     Wire.begin(SDA_PIN, SCL_PIN);
+    Wire.setClock(100000); // 100 kHz estable
 
-    Serial.println();
-    Serial.println("Bus I2C inicializado");
-}
+    // Inicializar Pantalla SH1106
+    if (display.begin(OLED_ADDRESS, true)) {
+        display.clearDisplay();
+        display.display();
+        apagarOLED();
+    }
 
-// ==================================================
-// INICIAR SCD41
-// ==================================================
-
-bool iniciarSCD41()
-{
-    uint16_t error;
-
+    // Inicializar Sensores
     scd4x.begin(Wire, 0x62);
+    scd4x.stopPeriodicMeasurement();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    scd4x.startPeriodicMeasurement();
 
-    error = scd4x.stopPeriodicMeasurement();
+    pmsa.begin_I2C(&Wire);
 
-    delay(500);
+    DatosLectura datos = {};
+    uint32_t secuenciaLocal = 0;
+    unsigned long ultimoCicloLectura = 0;
 
-    error = scd4x.startPeriodicMeasurement();
+    for (;;) {
+        // 1. Verificación continua del Pulsador (revisa cada 50ms)
+        if (digitalRead(BUTTON_PIN) == LOW && (millis() - ultimoDebounce > 200)) {
+            ultimoDebounce = millis();
+            encenderOLED();
+            actualizarOLED(datos);
+        }
 
-    if (error)
-    {
-        estadoSCD41 = SENSOR_NO_DETECTADO;
+        // 2. Control del apagado automático de la pantalla
+        if (oledEncendido && (millis() - tiempoEncendidoOLED >= duracionOLED)) {
+            apagarOLED();
+        }
 
-        Serial.println("SCD41 NO encontrado");
+        // 3. Tomar mediciones cada 15 segundos (sin bloquear el botón)
+        if (millis() - ultimoCicloLectura >= 15000 || ultimoCicloLectura == 0) {
+            ultimoCicloLectura = millis();
 
-        return false;
+            datos.secuencia = ++secuenciaLocal;
+            datos.timestamp = time(nullptr);
+
+            // Lectura SCD41
+            bool listo = false;
+            if (!scd4x.getDataReadyStatus(listo) && listo) {
+                if (!scd4x.readMeasurement(datos.co2, datos.temperatura, datos.humedad)) {
+                    datos.estadoSCD41 = 0; // OK
+                } else { datos.estadoSCD41 = 2; }
+            } else { datos.estadoSCD41 = 3; }
+
+            // Lectura PMSA003I
+            PM25_AQI_Data datosPM;
+            if (pmsa.read(&datosPM)) {
+                datos.pm1 = datosPM.pm10_standard;
+                datos.pm25 = datosPM.pm25_standard;
+                datos.pm10 = datosPM.pm100_standard;
+                datos.particulas03 = datosPM.particles_03um;
+                datos.estadoPMSA003I = 0; // OK
+            } else { datos.estadoPMSA003I = 2; }
+
+            // Actualizar la pantalla si está encendida
+            actualizarOLED(datos);
+
+            // Transferir datos a Core 0 sin bloqueo
+            xQueueSend(colaFreeRTOS, &datos, 0);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(50)); // Libera el procesador brevemente
     }
-
-    estadoSCD41 = SENSOR_OK;
-
-    Serial.println("SCD41 encontrado");
-
-    return true;
 }
 
 // ==================================================
-// INICIAR PMSA003I
+// TAREA 2: CONEXIÓN Y ALMACENAMIENTO (CORE 0)
 // ==================================================
-
-bool iniciarPMSA003I()
-{
-    if (!pmsa.begin_I2C())
-    {
-        estadoPMSA003I = SENSOR_NO_DETECTADO;
-
-        Serial.println("PMSA003I NO encontrado");
-
-        return false;
-    }
-
-    estadoPMSA003I = SENSOR_OK;
-
-    Serial.println("PMSA003I encontrado");
-
-    return true;
-}
-
-// ==================================================
-// LEER SCD41
-// ==================================================
-
-void leerSCD41()
-{
-    uint16_t error;
-
-    bool listo = false;
-
-    error = scd4x.getDataReadyStatus(listo);
-
-    if (error || !listo)
-    {
-        estadoSCD41 = SENSOR_TIMEOUT;
-
-        Serial.println("SCD41: datos no disponibles");
-
-        return;
-    }
-
-    error = scd4x.readMeasurement(
-        co2,
-        temperatura,
-        humedad
-    );
-
-    if (error)
-    {
-        estadoSCD41 = SENSOR_ERROR_LECTURA;
-
-        Serial.println("Error leyendo SCD41");
-
-        return;
-    }
-
-    estadoSCD41 = SENSOR_OK;
-}
-
-// ==================================================
-// LEER PMSA003I
-// ==================================================
-
-void leerPMSA003I()
-{
-    if (!pmsa.read(&datosPM))
-    {
-        estadoPMSA003I = SENSOR_ERROR_LECTURA;
-
-        Serial.println("Error leyendo PMSA003I");
-
-        return;
-    }
-
-    pm1 = datosPM.pm10_standard;
-
-    pm25 = datosPM.pm25_standard;
-
-    pm10 = datosPM.pm100_standard;
-
-    particulas03 = datosPM.particles_03um;
-
-    estadoPMSA003I = SENSOR_OK;
-}
-
-// ==================================================
-// LEER TODOS LOS SENSORES
-// ==================================================
-
-void leerSensores()
-{
-    timestamp = time(nullptr);
-
-    leerSCD41();
-
-    leerPMSA003I();
-}
-
-// ==================================================
-// OBTENER CHIP ID
-// ==================================================
-
-String obtenerChipID()
-{
-    uint64_t chipid = ESP.getEfuseMac();
-
-    char id[17];
-
-    sprintf(
-        id,
-        "%04X%08X",
-        (uint16_t)(chipid >> 32),
-        (uint32_t)chipid
-    );
-
-    return String(id);
-}
-
-// ==================================================
-// CREAR JSON
-// ==================================================
-
-void crearJSON()
-{
-    doc.clear();
-
-    JsonObject dispositivo =
-        doc["dispositivo"].to<JsonObject>();
-
-    dispositivo["id"] = chipID;
-
-    dispositivo["nombre"] = nombreNodo;
-
-    dispositivo["firmware"] = firmwareVersion;
-
-    dispositivo["secuencia"] = sequence;
-
-    dispositivo["timestamp"] = timestamp;
-
-    dispositivo["offline"] = colaPendiente > 0;
-
-    dispositivo["cola"] = colaPendiente;
-
-    JsonObject estado =
-        doc["estado"].to<JsonObject>();
-
-    estado["scd41"] = estadoSCD41;
-
-    estado["pmsa003i"] = estadoPMSA003I;
-
-    JsonObject entorno =
-        doc["entorno"].to<JsonObject>();
-
-    entorno["temperatura"] = temperatura;
-
-    entorno["humedad"] = humedad;
-
-    JsonObject aire =
-        doc["aire"].to<JsonObject>();
-
-    aire["co2"] = co2;
-
-    aire["pm1_0"] = pm1;
-
-    aire["pm2_5"] = pm25;
-
-    aire["pm10"] = pm10;
-
-    aire["particulas03"] = particulas03;
-
-    serializeJson(doc, payload);
-}
-
-// ==================================================
-// LITTLEFS
-// ==================================================
-
-bool iniciarLittleFS()
-{
-    if (!LittleFS.begin(true))
-    {
-        Serial.println("Error LittleFS");
-
-        return false;
-    }
-
-    Serial.println("LittleFS OK");
-
-    if (!LittleFS.exists(colaPath))
-    {
-        File archivo =
-            LittleFS.open(colaPath, "w");
-
-        if (archivo)
+void tareaComunicaciones(void *pvParameters) {
+    WiFiClientSecure espClient;
+    PubSubClient mqtt(espClient);
+    JsonDocument doc;
+    
+    std::deque<String> colaRAM;
+    const size_t MAX_RAM_MESSAGES = 100;
+    const char* colaPath = "/cola_offline.txt";
+    char payload[768];
+
+    // Inicializar Sistema de Archivos LittleFS
+    LittleFS.begin(true);
+
+    // Cargar pendientes de Flash a la RAM si existen
+    if (LittleFS.exists(colaPath)) {
+        File archivo = LittleFS.open(colaPath, "r");
+        if (archivo) {
+            while (archivo.available() && colaRAM.size() < MAX_RAM_MESSAGES) {
+                String linea = archivo.readStringUntil('\n');
+                linea.trim();
+                if (linea.length() > 5) colaRAM.push_back(linea);
+            }
             archivo.close();
-    }
-
-    colaPendiente = contarLineasCola();
-
-    if (colaPendiente > 0)
-    {
-        Serial.print("Cola pendiente al arrancar: ");
-
-        Serial.println(colaPendiente);
-    }
-
-    return true;
-}
-
-// ==================================================
-// CONTAR ELEMENTOS DE LA COLA
-// ==================================================
-
-uint16_t contarLineasCola()
-{
-    if (!LittleFS.exists(colaPath))
-        return 0;
-
-    File archivo =
-        LittleFS.open(colaPath, "r");
-
-    if (!archivo)
-        return 0;
-
-    uint16_t lineas = 0;
-
-    while (archivo.available())
-    {
-        String linea =
-            archivo.readStringUntil('\n');
-
-        linea.trim();
-
-        if (linea.length() > 0)
-            lineas++;
-    }
-
-    archivo.close();
-
-    return lineas;
-}
-
-// ==================================================
-// GUARDAR EN COLA
-// ==================================================
-
-bool guardarCola(const String& json)
-{
-    File archivo =
-        LittleFS.open(colaPath, "a");
-
-    if (!archivo)
-    {
-        Serial.println("No se pudo abrir cola");
-
-        return false;
-    }
-
-    archivo.println(json);
-
-    archivo.close();
-
-    colaPendiente++;
-
-    Serial.print("Medicion guardada en cola. Pendientes: ");
-
-    Serial.println(colaPendiente);
-
-    return true;
-}
-
-// ==================================================
-// PUBLICAR MQTT
-// ==================================================
-
-bool publicarJSON(const String& json)
-{
-    if (!mqtt.connected())
-        return false;
-
-    bool enviado =
-        mqtt.publish(
-            mqttTopic,
-            json.c_str()
-        );
-
-    if (enviado)
-    {
-        Serial.println("MQTT: publicado correctamente");
-    }
-    else
-    {
-        Serial.println("MQTT: error publicando");
-    }
-
-    return enviado;
-}
-
-// ==================================================
-// ELIMINAR PRIMER ELEMENTO DE LA COLA
-// ==================================================
-
-bool eliminarPrimeraLineaCola()
-{
-    File origen =
-        LittleFS.open(colaPath, "r");
-
-    if (!origen)
-        return false;
-
-    File temporal =
-        LittleFS.open(colaTmpPath, "w");
-
-    if (!temporal)
-    {
-        origen.close();
-
-        return false;
-    }
-
-    bool primeraLinea = true;
-
-    while (origen.available())
-    {
-        String linea =
-            origen.readStringUntil('\n');
-
-        linea.trim();
-
-        if (linea.length() == 0)
-            continue;
-
-        if (primeraLinea)
-        {
-            primeraLinea = false;
-
-            continue;
-        }
-
-        temporal.println(linea);
-    }
-
-    origen.close();
-
-    temporal.close();
-
-    LittleFS.remove(colaPath);
-
-    if (!LittleFS.rename(
-            colaTmpPath,
-            colaPath))
-    {
-        Serial.println(
-            "Error reemplazando cola"
-        );
-
-        return false;
-    }
-
-    if (colaPendiente > 0)
-        colaPendiente--;
-
-    return true;
-}
-
-// ==================================================
-// OBTENER PRIMER ELEMENTO DE LA COLA
-// ==================================================
-
-String obtenerPrimeraLineaCola()
-{
-    if (!LittleFS.exists(colaPath))
-        return "";
-
-    File archivo =
-        LittleFS.open(colaPath, "r");
-
-    if (!archivo)
-        return "";
-
-    String linea =
-        archivo.readStringUntil('\n');
-
-    archivo.close();
-
-    linea.trim();
-
-    return linea;
-}
-
-// ==================================================
-// PROCESAR UNA MEDICIÓN DE LA COLA
-// ==================================================
-
-void procesarCola()
-{
-    if (!wifiOK)
-        return;
-
-    if (!mqtt.connected())
-        return;
-
-    if (colaPendiente == 0)
-        return;
-
-    String medicion =
-        obtenerPrimeraLineaCola();
-
-    if (medicion.length() == 0)
-        return;
-
-    Serial.println();
-    Serial.println("Reenviando medicion pendiente...");
-
-    Serial.print("Pendientes antes: ");
-
-    Serial.println(colaPendiente);
-
-    if (publicarJSON(medicion))
-    {
-        if (eliminarPrimeraLineaCola())
-        {
-            Serial.println(
-                "Medicion eliminada de la cola"
-            );
-
-            Serial.print(
-                "Pendientes despues: "
-            );
-
-            Serial.println(colaPendiente);
+            LittleFS.remove(colaPath);
         }
     }
-    else
-    {
-        Serial.println(
-            "No se pudo enviar. "
-            "La medicion permanece en cola."
-        );
-    }
-}
-
-// ==================================================
-// PUBLICAR NUEVA MEDICIÓN
-// ==================================================
-
-void publicarMedicion()
-{
-    // Cada medición obtiene su propio número
-    sequence++;
-
-    timestamp = time(nullptr);
-
-    crearJSON();
-
-    Serial.println();
-
-    Serial.print(
-        "Nueva medicion. Secuencia: "
-    );
-
-    Serial.println(sequence);
-
-    /*
-       IMPORTANTE:
-
-       Primero guardamos la medición.
-
-       Así nunca dependemos de que MQTT
-       esté disponible en ese instante.
-    */
-
-    if (!guardarCola(payload))
-    {
-        Serial.println(
-            "ERROR CRITICO: "
-            "no se pudo guardar la medicion"
-        );
-
-        return;
-    }
-
-    /*
-       Si MQTT está disponible intentamos
-       enviar inmediatamente.
-
-       La cola sigue siendo la fuente
-       de verdad.
-    */
-
-    if (mqtt.connected())
-    {
-        procesarCola();
-    }
-
-    offline = colaPendiente > 0;
-}
-
-// ==================================================
-// CONEXIÓN WIFI
-// ==================================================
-
-void conectarWiFi()
-{
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        wifiOK = true;
-
-        return;
-    }
-
-    wifiOK = false;
-
-    Serial.println();
-    Serial.println("Conectando WiFi...");
 
     WiFi.mode(WIFI_STA);
-
-    WiFi.begin(
-        ssid,
-        password
-    );
-
-    unsigned long inicio =
-        millis();
-
-    while (
-        WiFi.status() != WL_CONNECTED &&
-        millis() - inicio < 20000
-    )
-    {
-        delay(500);
-
-        Serial.print(".");
-    }
-
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        wifiOK = true;
-
-        Serial.println();
-
-        Serial.println(
-            "WiFi conectado"
-        );
-
-        Serial.print("IP: ");
-
-        Serial.println(
-            WiFi.localIP()
-        );
-
-        Serial.print("RSSI: ");
-
-        Serial.print(
-            WiFi.RSSI()
-        );
-
-        Serial.println(" dBm");
-    }
-    else
-    {
-        wifiOK = false;
-
-        Serial.println();
-
-        Serial.println(
-            "No fue posible conectar al WiFi"
-        );
-    }
-}
-
-// ==================================================
-// VERIFICAR WIFI
-// ==================================================
-
-void verificarWiFi()
-{
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        wifiOK = true;
-
-        return;
-    }
-
-    if (wifiOK)
-    {
-        Serial.println();
-        Serial.println(
-            "Conexion WiFi perdida"
-        );
-    }
-
-    wifiOK = false;
-
-    conectarWiFi();
-}
-
-// ==================================================
-// CONECTAR MQTT
-// ==================================================
-
-void conectarMQTT()
-{
-    if (!wifiOK)
-        return;
-
-    if (mqtt.connected())
-    {
-        mqttOK = true;
-
-        return;
-    }
-
-    unsigned long ahora =
-        millis();
-
-    if (
-        ahora - previousMQTT <
-        mqttReconnectInterval
-    )
-    {
-        return;
-    }
-
-    previousMQTT = ahora;
-
-    Serial.println();
-
-    Serial.println(
-        "Intentando conectar a EMQX..."
-    );
-
-    if (
-        mqtt.connect(
-            chipID.c_str(),
-            mqttUser,
-            mqttPassword
-        )
-    )
-    {
-        mqttOK = true;
-
-        Serial.println(
-            "Broker EMQX conectado"
-        );
-    }
-    else
-    {
-        mqttOK = false;
-
-        Serial.print(
-            "Error MQTT: "
-        );
-
-        Serial.println(
-            mqtt.state()
-        );
-    }
-}
-
-// ==================================================
-// VERIFICAR MQTT
-// ==================================================
-
-void verificarMQTT()
-{
-    if (
-        mqtt.connected()
-    )
-    {
-        mqttOK = true;
-
-        return;
-    }
-
-    mqttOK = false;
-
-    conectarMQTT();
-}
-
-// ==================================================
-// IMPRIMIR SENSORES
-// ==================================================
-
-void imprimirSensores()
-{
-    Serial.println();
-
-    Serial.println(
-        "=========================="
-    );
-
-    Serial.print("CO2: ");
-
-    Serial.print(co2);
-
-    Serial.println(" ppm");
-
-    Serial.print(
-        "Temperatura: "
-    );
-
-    Serial.print(
-        temperatura
-    );
-
-    Serial.println(" °C");
-
-    Serial.print(
-        "Humedad: "
-    );
-
-    Serial.print(
-        humedad
-    );
-
-    Serial.println(" %");
-
-    Serial.println();
-
-    Serial.print("PM1.0: ");
-
-    Serial.println(pm1);
-
-    Serial.print("PM2.5: ");
-
-    Serial.println(pm25);
-
-    Serial.print("PM10: ");
-
-    Serial.println(pm10);
-
-    Serial.print(">0.3um: ");
-
-    Serial.println(particulas03);
-
-    Serial.println();
-
-    Serial.print(
-        "Estado SCD41: "
-    );
-
-    Serial.println(
-        estadoSCD41
-    );
-
-    Serial.print(
-        "Estado PMSA003I: "
-    );
-
-    Serial.println(
-        estadoPMSA003I
-    );
-
-    Serial.println();
-
-    Serial.print("WiFi: ");
-
-    Serial.println(
-        wifiOK
-        ? "OK"
-        : "DESCONECTADO"
-    );
-
-    Serial.print("MQTT: ");
-
-    Serial.println(
-        mqttOK
-        ? "OK"
-        : "DESCONECTADO"
-    );
-
-    Serial.print(
-        "Cola pendiente: "
-    );
-
-    Serial.println(
-        colaPendiente
-    );
-
-    crearJSON();
-
-    Serial.println();
-
-    Serial.println("JSON:");
-
-    Serial.println(payload);
-
-    Serial.println(
-        "=========================="
-    );
-}
-
-// ==================================================
-// SETUP
-// ==================================================
-
-void setup()
-{
-    Serial.begin(115200);
-
-    delay(1000);
-
-    Serial.println();
-
-    Serial.println(
-        "========================"
-    );
-
-    Serial.println(
-        "Firmware 2.2.0"
-    );
-
-    Serial.println(
-        "========================"
-    );
-
-    chipID =
-        obtenerChipID();
-
-    iniciarI2C();
-
-    iniciarSCD41();
-
-    iniciarPMSA003I();
-
-    iniciarLittleFS();
-
-    WiFi.mode(WIFI_STA);
-
-    conectarWiFi();
-
-    configTime(
-        -4 * 3600,
-        0,
-        "pool.ntp.org",
-        "time.nist.gov"
-    );
-
-    delay(3000);
+    WiFi.begin(ssid, password);
+    configTime(-4 * 3600, 0, "pool.ntp.org", "time.nist.gov");
 
     espClient.setInsecure();
+    mqtt.setBufferSize(1024);
+    mqtt.setServer(mqttServer, mqttPort);
 
-    mqtt.setBufferSize(
-        mqttBufferSize
-    );
+    DatosLectura datosRecibidos;
+    unsigned long ultimoIntentoMQTT = 0;
 
-    mqtt.setServer(
-        mqttServer,
-        mqttPort
-    );
+    for (;;) {
+        // 1. Gestión Conexión WiFi
+        if (WiFi.status() == WL_CONNECTED) {
+            // Gestión Conexión MQTT
+            if (!mqtt.connected()) {
+                if (millis() - ultimoIntentoMQTT >= 5000) {
+                    ultimoIntentoMQTT = millis();
+                    mqtt.connect(chipID.c_str(), mqttUser, mqttPassword);
+                }
+            } else {
+                mqtt.loop();
+            }
+        }
 
-    conectarMQTT();
+        // 2. Comprobar si hay nuevas lecturas provenientes de Core 1
+        if (xQueueReceive(colaFreeRTOS, &datosRecibidos, 0) == pdTRUE) {
+            doc.clear();
 
-    previousPublish =
-        millis();
+            JsonObject dispositivo = doc["dispositivo"].to<JsonObject>();
+            dispositivo["id"] = chipID;
+            dispositivo["nombre"] = nombreNodo;
+            dispositivo["firmware"] = firmwareVersion;
+            dispositivo["secuencia"] = datosRecibidos.secuencia;
+            dispositivo["timestamp"] = datosRecibidos.timestamp;
+            dispositivo["cola"] = colaRAM.size();
 
-    previousRecovery =
-        millis();
+            JsonObject estado = doc["estado"].to<JsonObject>();
+            estado["scd41"] = datosRecibidos.estadoSCD41;
+            estado["pmsa003i"] = datosRecibidos.estadoPMSA003I;
+
+            JsonObject entorno = doc["entorno"].to<JsonObject>();
+            entorno["temperatura"] = datosRecibidos.temperatura;
+            entorno["humedad"] = datosRecibidos.humedad;
+
+            JsonObject aire = doc["aire"].to<JsonObject>();
+            aire["co2"] = datosRecibidos.co2;
+            aire["pm1_0"] = datosRecibidos.pm1;
+            aire["pm2_5"] = datosRecibidos.pm25;
+            aire["pm10"] = datosRecibidos.pm10;
+            aire["particulas03"] = datosRecibidos.particulas03;
+
+            serializeJson(doc, payload);
+
+            // Respaldar a Flash si la RAM se llena
+            if (colaRAM.size() >= MAX_RAM_MESSAGES) {
+                File archivo = LittleFS.open(colaPath, "a");
+                if (archivo) {
+                    while (!colaRAM.empty()) {
+                        archivo.println(colaRAM.front());
+                        colaRAM.pop_front();
+                    }
+                    archivo.close();
+                }
+            }
+
+            colaRAM.push_back(String(payload));
+        }
+
+        // 3. Procesar y publicar la cola en orden estricto FIFO
+        if (mqtt.connected() && !colaRAM.empty()) {
+            String medicion = colaRAM.front();
+            if (mqtt.publish(mqttTopic, medicion.c_str())) {
+                colaRAM.pop_front(); // Se remueve solo cuando fue confirmado por el Broker
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100)); // Mantener activo el Watchdog del Core 0
+    }
 }
 
 // ==================================================
-// LOOP
+// SETUP / LOOP
 // ==================================================
+void setup() {
+    Serial.begin(115200);
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
 
-void loop()
-{
-    // -----------------------------------------------
-    // Comunicación
-    // -----------------------------------------------
+    // Formatear Chip ID
+    uint64_t chipid = ESP.getEfuseMac();
+    char id[17];
+    sprintf(id, "%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid);
+    chipID = String(id);
 
-    verificarWiFi();
+    // Crear cola inter-procesos (capacidad de 10 estructuras)
+    colaFreeRTOS = xQueueCreate(10, sizeof(DatosLectura));
 
-    verificarMQTT();
+    // Crear Tarea 1 en CORE 1 (Sensores, Pantalla, Botón)
+    xTaskCreatePinnedToCore(
+        tareaSensores,
+        "Sensores",
+        4096,
+        NULL,
+        2, // Prioridad Alta
+        NULL,
+        1  // Core 1
+    );
 
-    mqtt.loop();
+    // Crear Tarea 2 en CORE 0 (Red, MQTT, Flash)
+    xTaskCreatePinnedToCore(
+        tareaComunicaciones,
+        "Comunicaciones",
+        8192,
+        NULL,
+        1, // Prioridad Media
+        NULL,
+        0  // Core 0
+    );
+}
 
-    unsigned long ahora =
-        millis();
-
-    // -----------------------------------------------
-    // REENVÍO DE COLA
-    //
-    // Máximo UNA medición cada 3 segundos
-    // -----------------------------------------------
-
-    if (
-        ahora - previousRecovery >=
-        recoveryInterval
-    )
-    {
-        previousRecovery = ahora;
-
-        procesarCola();
-    }
-
-    // -----------------------------------------------
-    // NUEVA MEDICIÓN CADA 15 SEGUNDOS
-    // -----------------------------------------------
-
-    if (
-        ahora - previousPublish >=
-        publishInterval
-    )
-    {
-        previousPublish = ahora;
-
-        leerSensores();
-
-        imprimirSensores();
-
-        publicarMedicion();
-    }
-
-    // -----------------------------------------------
-    // Estado offline
-    // -----------------------------------------------
-
-    offline =
-        colaPendiente > 0;
+void loop() {
+    // El loop principal se elimina para dejar libre a los planificadores de FreeRTOS
+    vTaskDelete(NULL);
 }

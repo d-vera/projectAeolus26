@@ -9,10 +9,8 @@ public record AirQualityMessage(
 ) {
     public record Dispositivo(
             @JsonProperty("id") String id,
-            @JsonProperty("nombre") String nombre,
             @JsonProperty("firmware") String firmware,
-            @JsonProperty("secuencia") Integer secuencia,
-            @JsonProperty("Timestamp") Long timestamp
+            @JsonProperty("secuencia") Integer secuencia
     ) {}
 
     public record Entorno(

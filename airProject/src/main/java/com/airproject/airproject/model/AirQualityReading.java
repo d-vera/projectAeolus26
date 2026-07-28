@@ -5,22 +5,17 @@ import java.time.Instant;
 
 @Entity
 @Table(name = "air_quality_readings")
-@IdClass(AirQualityReadingId.class)
 public class AirQualityReading {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Id
     @Column(name = "time", nullable = false)
     private Instant time;
 
     @Column(name = "device_id", nullable = false, length = 50)
     private String deviceId;
-
-    @Column(name = "device_name", length = 100)
-    private String deviceName;
 
     @Column(name = "firmware", length = 20)
     private String firmware;
@@ -54,14 +49,8 @@ public class AirQualityReading {
 
     public AirQualityReading(Instant time, String deviceId, String firmware, Integer sequence, String topic,
                              Double temperature, Double humidity, Double co2, Double pm10Small, Double pm25, Double pm10) {
-        this(time, deviceId, null, firmware, sequence, topic, temperature, humidity, co2, pm10Small, pm25, pm10);
-    }
-
-    public AirQualityReading(Instant time, String deviceId, String deviceName, String firmware, Integer sequence, String topic,
-                             Double temperature, Double humidity, Double co2, Double pm10Small, Double pm25, Double pm10) {
         this.time = time;
         this.deviceId = deviceId;
-        this.deviceName = deviceName;
         this.firmware = firmware;
         this.sequence = sequence;
         this.topic = topic;
@@ -95,14 +84,6 @@ public class AirQualityReading {
 
     public void setDeviceId(String deviceId) {
         this.deviceId = deviceId;
-    }
-
-    public String getDeviceName() {
-        return deviceName;
-    }
-
-    public void setDeviceName(String deviceName) {
-        this.deviceName = deviceName;
     }
 
     public String getFirmware() {

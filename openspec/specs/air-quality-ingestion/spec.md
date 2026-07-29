@@ -15,15 +15,21 @@ The system SHALL deserialize incoming MQTT messages from the subscribed topic in
 
 ```json
 {
-  "dispositivo": { "id": "node1", "firmware": "1.0.0", "secuencia": 120 },
-  "entorno": { "temperatura": 22.24, "humedad": 35.96289 },
-  "aire": { "co2": 454, "pm1_0": 17.11648, "pm2_5": 28.52747, "pm10": 34.23297 }
+  "dispositivo": {
+    "id": "ACEA5AC8E720",
+    "nombre": "Node1",
+    "firmware": "1.0.2",
+    "secuencia": 109,
+    "Timestamp": 1785274877
+  },
+  "entorno": { "temperatura": 23.7, "humedad": 20.16699 },
+  "aire": { "co2": 482, "pm1_0": 19.29231, "pm2_5": 32.15385, "pm10": 38.58462 }
 }
 ```
 
 #### Scenario: Valid air quality message received
 - **WHEN** a valid JSON message is published to `calidad_aire/nodo1`
-- **THEN** the system deserializes it into an `AirQualityMessage` DTO with nested `dispositivo`, `entorno`, and `aire` objects
+- **THEN** the system deserializes it into an `AirQualityMessage` DTO with nested `dispositivo` (including `id`, `nombre`, `firmware`, `secuencia`, `Timestamp`), `entorno`, and `aire` objects
 
 #### Scenario: Malformed JSON message received
 - **WHEN** a message with invalid JSON is published to the subscribed topic
@@ -31,8 +37,9 @@ The system SHALL deserialize incoming MQTT messages from the subscribed topic in
 
 ### Requirement: System maps DTO to entity and persists to database
 The system SHALL map each successfully deserialized `AirQualityMessage` to an `AirQualityReading` entity and persist it to the database. The entity SHALL include:
-- `time`: server-side arrival timestamp (`Instant.now()`)
+- `time`: payload `dispositivo.Timestamp` converted to `Instant` (or server `Instant.now()` if `Timestamp` is null)
 - `deviceId`: from `dispositivo.id`
+- `deviceName`: from `dispositivo.nombre`
 - `firmware`: from `dispositivo.firmware`
 - `sequence`: from `dispositivo.secuencia`
 - `topic`: the MQTT topic the message arrived on
@@ -45,7 +52,7 @@ The system SHALL map each successfully deserialized `AirQualityMessage` to an `A
 
 #### Scenario: Message successfully persisted
 - **WHEN** a valid air quality message is received and deserialized
-- **THEN** the system persists an `AirQualityReading` entity with `time` set to the current server timestamp and all sensor fields mapped from the message
+- **THEN** the system persists an `AirQualityReading` entity with `time` derived from `Timestamp` (or current server timestamp if missing), `deviceName` set to `dispositivo.nombre`, and all sensor fields mapped from the message
 
 ### Requirement: System logs each successfully ingested message
 The system SHALL log a confirmation message at INFO level after each successful persistence, including the device ID and topic.

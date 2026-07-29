@@ -39,38 +39,42 @@ const char* mqttTopic = "calidad_aire/nodo1";
 // ESTRUCTURA DE DATOS INTER-TAREAS (FreeRTOS)
 // ==================================================
 struct DatosLectura {
-    uint16_t co2;
-    float temperatura;
-    float humedad;
-    uint16_t pm1;
-    uint16_t pm25;
-    uint16_t pm10;
-    uint16_t particulas03;
-    uint8_t estadoSCD41;
-    uint8_t estadoPMSA003I;
-    time_t timestamp;
-    uint32_t secuencia;
-    size_t tamañoCola;
-    bool wifiConectado;
+    uint16_t co2 = 0;
+    float temperatura = 0.0;
+    float humedad = 0.0;
+    uint16_t pm1 = 0;
+    uint16_t pm25 = 0;
+    uint16_t pm10 = 0;
+    uint16_t particulas03 = 0;
+    uint8_t estadoSCD41 = 1;      // 0: OK, 1: NO DETECTADO, 2: ERROR, 3: TIMEOUT
+    uint8_t estadoPMSA003I = 1;
+    time_t timestamp = 0;
+    uint32_t secuencia = 0;
+    size_t tamañoCola = 0;
+    bool wifiConectado = false;
 };
 
-// Queue de FreeRTOS para pasar datos entre el Core 1 y el Core 0
+// Primitive Handles de FreeRTOS
 QueueHandle_t colaFreeRTOS;
+SemaphoreHandle_t mutexI2C;
 
-// Globales compartidas en el Core 1
+// Objetos Globales
 Adafruit_PM25AQI pmsa;
 SensirionI2cScd4x scd4x;
 Adafruit_SH1106G display = Adafruit_SH1106G(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 String chipID;
 const char* nombreNodo = "Node1";
-const char* firmwareVersion = "3.2.0-CustomOLED";
+const char* firmwareVersion = "3.2.1-CustomOLED-Fix";
 
 // Control OLED
 bool oledEncendido = false;
 unsigned long tiempoEncendidoOLED = 0;
 const uint32_t duracionOLED = 10000; // 10 segundos activo
 unsigned long ultimoDebounce = 0;
+
+// Variable compartida para reflejar el tamaño de cola en pantalla
+volatile size_t tamanoColaGlobal = 0;
 
 // ==================================================
 // TRADUCTOR DE ESTADO DE SENSORES
@@ -79,22 +83,28 @@ String obtenerTextoEstado(uint8_t estado) {
     switch (estado) {
         case 0: return "OK";
         case 1: return "NO DETECTADO";
-        case 2: return "ERROR LECTURA";
+        case 2: return "ERR LECTURA";
         case 3: return "TIMEOUT";
         default: return "DESCONOCIDO";
     }
 }
 
 // ==================================================
-// CONTROL PANTALLA OLED (PERSONALIZADA)
+// CONTROL PANTALLA OLED (SIN HEADER)
 // ==================================================
 void apagarOLED() {
-    display.oled_command(SH110X_DISPLAYOFF);
+    if (xSemaphoreTake(mutexI2C, pdMS_TO_TICKS(100)) == pdTRUE) {
+        display.oled_command(SH110X_DISPLAYOFF);
+        xSemaphoreGive(mutexI2C);
+    }
     oledEncendido = false;
 }
 
 void encenderOLED() {
-    display.oled_command(SH110X_DISPLAYON);
+    if (xSemaphoreTake(mutexI2C, pdMS_TO_TICKS(100)) == pdTRUE) {
+        display.oled_command(SH110X_DISPLAYON);
+        xSemaphoreGive(mutexI2C);
+    }
     oledEncendido = true;
     tiempoEncendidoOLED = millis();
 }
@@ -102,48 +112,43 @@ void encenderOLED() {
 void actualizarOLED(const DatosLectura& d) {
     if (!oledEncendido) return;
 
-    display.clearDisplay();
-    display.setTextSize(1);
+    if (xSemaphoreTake(mutexI2C, pdMS_TO_TICKS(200)) == pdTRUE) {
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(SH110X_WHITE);
 
-    // Header invertido (Fondo blanco con texto negro)
-    //display.fillRect(0, 0, 128, 12, SH110X_WHITE);
-    //display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-    //display.setCursor(8, 2);
-    //display.println("ESTADO DEL NODO");
+        // 1. Estado WiFi (Y = 0)
+        display.setCursor(0, 0);
+        display.print("WiFi: ");
+        if (d.wifiConectado) {
+            display.println("CONECTADO");
+        } else {
+            display.println("DESCONECTADO");
+        }
 
-    // Texto normal para el resto del contenido
-    display.setTextColor(SH110X_WHITE);
+        // 2. Secuencia de envío (Y = 16)
+        display.setCursor(0, 16);
+        display.print("Secuencia: #");
+        display.println(d.secuencia);
 
-    // 1. Estado WiFi
-    display.setCursor(0, 16);
-    display.print("WiFi: ");
-    if (d.wifiConectado) {
-        display.println("CONECTADO");
-    } else {
-        display.println("DESCONECTADO");
+        // 3. Cola de almacenamiento acumulada (Y = 32)
+        display.setCursor(0, 28);
+        display.print("Pendientes: ");
+        display.print(tamanoColaGlobal);
+        display.println(" msgs");
+
+        // 4. Estado Sensores (Y = 48)
+        display.setCursor(0, 40);
+        display.print("SCD41:");
+        display.println(obtenerTextoEstado(d.estadoSCD41));
+
+        display.setCursor(0, 52);
+        display.print("PMSA003I:");
+        display.print(obtenerTextoEstado(d.estadoPMSA003I));
+
+        display.display();
+        xSemaphoreGive(mutexI2C);
     }
-
-    // 2. Secuencia de envío
-    display.setCursor(0, 28);
-    display.print("Secuencia: #");
-    display.println(d.secuencia);
-
-    // 3. Cola de almacenamiento acumulada
-    display.setCursor(0, 40);
-    display.print("Cola FIFO: ");
-    display.print(d.tamañoCola);
-    display.println(" msgs");
-
-    // 4. Estado Sensores (Línea final)
-    display.setCursor(0, 52);
-    display.print("SCD:");
-    display.println(obtenerTextoEstado(d.estadoSCD41));
-    
-    display.setCursor(68, 52);
-    display.print("PMS:");
-    display.print(obtenerTextoEstado(d.estadoPMSA003I));
-
-    display.display();
 }
 
 // ==================================================
@@ -153,28 +158,43 @@ void tareaSensores(void *pvParameters) {
     Wire.begin(SDA_PIN, SCL_PIN);
     Wire.setClock(100000);
 
-    if (display.begin(OLED_ADDRESS, true)) {
-        display.clearDisplay();
-        display.display();
-        apagarOLED();
+    if (xSemaphoreTake(mutexI2C, portMAX_DELAY) == pdTRUE) {
+        if (display.begin(OLED_ADDRESS, true)) {
+            display.clearDisplay();
+            display.display();
+            display.oled_command(SH110X_DISPLAYOFF);
+            oledEncendido = false;
+        }
+
+        // Inicializar SCD41
+        scd4x.begin(Wire, 0x62);
+        scd4x.stopPeriodicMeasurement();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        scd4x.startPeriodicMeasurement();
+
+        // Inicializar PMSA003I
+        pmsa.begin_I2C(&Wire);
+
+        xSemaphoreGive(mutexI2C);
     }
 
-    scd4x.begin(Wire, 0x62);
-    scd4x.stopPeriodicMeasurement();
-    vTaskDelay(pdMS_TO_TICKS(100));
-    scd4x.startPeriodicMeasurement();
-
-    pmsa.begin_I2C(&Wire);
+    // Espera inicial para estabilizar sensores
+    vTaskDelay(pdMS_TO_TICKS(3000));
 
     DatosLectura datos = {};
     uint32_t secuenciaLocal = 0;
     unsigned long ultimoCicloLectura = 0;
 
     for (;;) {
-        // 1. Lectura del botón
-        if (digitalRead(BUTTON_PIN) == LOW && (millis() - ultimoDebounce > 200)) {
+        // 1. Lectura del botón con Debounce
+        if (digitalRead(BUTTON_PIN) == LOW && (millis() - ultimoDebounce > 250)) {
             ultimoDebounce = millis();
-            encenderOLED();
+            if (!oledEncendido) {
+                encenderOLED();
+            } else {
+                // Si ya está encendido, reinicia el tiempo de apagado
+                tiempoEncendidoOLED = millis();
+            }
             actualizarOLED(datos);
         }
 
@@ -191,28 +211,51 @@ void tareaSensores(void *pvParameters) {
             datos.timestamp = time(nullptr);
             datos.wifiConectado = (WiFi.status() == WL_CONNECTED);
 
-            // Lectura SCD41
-            bool listo = false;
-            if (!scd4x.getDataReadyStatus(listo) && listo) {
-                if (!scd4x.readMeasurement(datos.co2, datos.temperatura, datos.humedad)) {
-                    datos.estadoSCD41 = 0; // OK
-                } else { datos.estadoSCD41 = 2; }
-            } else { datos.estadoSCD41 = 3; }
+            if (xSemaphoreTake(mutexI2C, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                
+                // --- LECTURA SCD41 CORREGIDA ---
+                bool listo = false;
+                uint16_t errorStatus = scd4x.getDataReadyStatus(listo);
+                
+                // Si no está listo inmediatamente, intentamos durante 1s (2 intentos de 500ms)
+                if (errorStatus == 0 && !listo) {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    errorStatus = scd4x.getDataReadyStatus(listo);
+                }
 
-            // Lectura PMSA003I
-            PM25_AQI_Data datosPM;
-            if (pmsa.read(&datosPM)) {
-                datos.pm1 = datosPM.pm10_standard;
-                datos.pm25 = datosPM.pm25_standard;
-                datos.pm10 = datosPM.pm100_standard;
-                datos.particulas03 = datosPM.particles_03um;
-                datos.estadoPMSA003I = 0; // OK
-            } else { datos.estadoPMSA003I = 2; }
+                if (errorStatus == 0 && listo) {
+                    uint16_t errorRead = scd4x.readMeasurement(datos.co2, datos.temperatura, datos.humedad);
+                    if (errorRead == 0 && datos.co2 > 0) {
+                        datos.estadoSCD41 = 0; // OK
+                    } else {
+                        datos.estadoSCD41 = 2; // ERROR LECTURA
+                    }
+                } else if (errorStatus != 0) {
+                    datos.estadoSCD41 = 2; // ERROR I2C
+                } else {
+                    // Si no listo pero sin error de bus, marcamos TIMEOUT en lugar de fallo I2C
+                    datos.estadoSCD41 = 3; 
+                }
 
-            // Actualiza la pantalla personalizada
+                // --- LECTURA PMSA003I ---
+                PM25_AQI_Data datosPM;
+                if (pmsa.read(&datosPM)) {
+                    datos.pm1 = datosPM.pm10_standard;
+                    datos.pm25 = datosPM.pm25_standard;
+                    datos.pm10 = datosPM.pm100_standard;
+                    datos.particulas03 = datosPM.particles_03um;
+                    datos.estadoPMSA003I = 0; // OK
+                } else {
+                    datos.estadoPMSA003I = 2; // ERROR LECTURA
+                }
+
+                xSemaphoreGive(mutexI2C);
+            }
+
+            // Actualiza la pantalla OLED con los nuevos datos
             actualizarOLED(datos);
 
-            // Envía datos al Core 0
+            // Envía copia de datos a la cola de comunicaciones
             xQueueSend(colaFreeRTOS, &datos, 0);
         }
 
@@ -235,6 +278,7 @@ void tareaComunicaciones(void *pvParameters) {
 
     LittleFS.begin(true);
 
+    // Cargar historial previo guardado en LittleFS a la RAM
     if (LittleFS.exists(colaPath)) {
         File archivo = LittleFS.open(colaPath, "r");
         if (archivo) {
@@ -244,7 +288,7 @@ void tareaComunicaciones(void *pvParameters) {
                 if (linea.length() > 5) colaRAM.push_back(linea);
             }
             archivo.close();
-            LittleFS.remove(colaPath);
+            LittleFS.remove(colaPath); // Limpiamos el archivo tras pasarlo a RAM
         }
     }
 
@@ -260,6 +304,7 @@ void tareaComunicaciones(void *pvParameters) {
     unsigned long ultimoIntentoMQTT = 0;
 
     for (;;) {
+        // Control WiFi y Reconexión MQTT
         if (WiFi.status() == WL_CONNECTED) {
             if (!mqtt.connected()) {
                 if (millis() - ultimoIntentoMQTT >= 5000) {
@@ -271,18 +316,16 @@ void tareaComunicaciones(void *pvParameters) {
             }
         }
 
+        // Recepción de mediciones del Core 1
         if (xQueueReceive(colaFreeRTOS, &datosRecibidos, 0) == pdTRUE) {
-            // Actualizar tamaño actual de la cola para reflejarlo en la pantalla
-            datosRecibidos.tamañoCola = colaRAM.size();
-
             doc.clear();
             JsonObject dispositivo = doc["dispositivo"].to<JsonObject>();
             dispositivo["id"] = chipID;
-            dispositivo["nombre"] = nombreNodo;
+            //dispositivo["nombre"] = nombreNodo;
             dispositivo["firmware"] = firmwareVersion;
             dispositivo["secuencia"] = datosRecibidos.secuencia;
             dispositivo["timestamp"] = datosRecibidos.timestamp;
-            dispositivo["cola"] = datosRecibidos.tamañoCola;
+            //dispositivo["cola"] = colaRAM.size();
 
             JsonObject estado = doc["estado"].to<JsonObject>();
             estado["scd41"] = datosRecibidos.estadoSCD41;
@@ -301,24 +344,27 @@ void tareaComunicaciones(void *pvParameters) {
 
             serializeJson(doc, payload);
 
+            // Si la RAM se llena, respaldamos el exceso en LittleFS
             if (colaRAM.size() >= MAX_RAM_MESSAGES) {
                 File archivo = LittleFS.open(colaPath, "a");
                 if (archivo) {
-                    while (!colaRAM.empty()) {
-                        archivo.println(colaRAM.front());
-                        colaRAM.pop_front();
-                    }
+                    archivo.println(payload);
                     archivo.close();
                 }
+            } else {
+                colaRAM.push_back(String(payload));
             }
 
-            colaRAM.push_back(String(payload));
+            // Actualizar variable global para sincronizar con la OLED
+            tamanoColaGlobal = colaRAM.size();
         }
 
+        // Envío de la cola acumulada vía MQTT
         if (mqtt.connected() && !colaRAM.empty()) {
             String medicion = colaRAM.front();
             if (mqtt.publish(mqttTopic, medicion.c_str())) {
                 colaRAM.pop_front();
+                tamanoColaGlobal = colaRAM.size();
             }
         }
 
@@ -338,8 +384,11 @@ void setup() {
     sprintf(id, "%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid);
     chipID = String(id);
 
+    // Creación de primitivas FreeRTOS
+    mutexI2C = xSemaphoreCreateMutex();
     colaFreeRTOS = xQueueCreate(10, sizeof(DatosLectura));
 
+    // Tareas distribuidas en doble núcleo
     xTaskCreatePinnedToCore(tareaSensores, "Sensores", 4096, NULL, 2, NULL, 1);
     xTaskCreatePinnedToCore(tareaComunicaciones, "Comunicaciones", 8192, NULL, 1, NULL, 0);
 }

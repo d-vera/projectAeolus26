@@ -48,22 +48,20 @@ public class UserService {
         return UserResponse.fromEntity(updatedUser);
     }
 
-
-
     public List<UserResponse> getAllUsers() {
-        return userRepository.findAll().stream()
+        return userRepository.findAllByActiveTrue().stream()
                 .map(UserResponse::fromEntity)
                 .collect(Collectors.toList());
     }
 
     public UserResponse getUserById(Long id) {
-        User user = userRepository.findById(id)
+        User user = userRepository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new UserNotFoundException("User not found with id: " + id));
         return UserResponse.fromEntity(user);
     }
 
     public UserResponse updateUser(Long id, UpdateUserRequest request) {
-        User user = userRepository.findById(id)
+        User user = userRepository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new UserNotFoundException("User not found with id: " + id));
 
         if (StringUtils.hasText(request.getFirstName())) {
@@ -74,9 +72,6 @@ public class UserService {
         }
         if (StringUtils.hasText(request.getPassword())) {
             user.setPassword(passwordEncoder.encode(request.getPassword()));
-        }
-        if (request.getActive() != null) {
-            user.setActive(request.getActive());
         }
 
         User updatedUser = userRepository.save(user);
@@ -91,7 +86,7 @@ public class UserService {
     }
 
     public UserResponse assignRole(Long id, AssignRoleRequest request) {
-        User user = userRepository.findById(id)
+        User user = userRepository.findByIdAndActiveTrue(id)
                 .orElseThrow(() -> new UserNotFoundException("User not found with id: " + id));
 
         user.setRole(request.getRole());

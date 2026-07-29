@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -52,10 +53,8 @@ public class UserController {
         return ResponseEntity.ok(response);
     }
 
-
-
     @GetMapping
-    @Operation(summary = "List all users", description = "Admin endpoint to retrieve all users in the system, including active and inactive accounts.")
+    @Operation(summary = "List all active users", description = "Admin endpoint to retrieve all active users in the system.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "List of users retrieved successfully"),
             @ApiResponse(responseCode = "403", description = "Forbidden — Admin access required")
@@ -66,7 +65,7 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get user by ID", description = "Admin endpoint to retrieve details of a specific user, including inactive accounts.")
+    @Operation(summary = "Get user by ID", description = "Admin endpoint to retrieve details of a specific active user.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "User retrieved successfully"),
             @ApiResponse(responseCode = "403", description = "Forbidden — Admin access required"),

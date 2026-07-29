@@ -44,9 +44,6 @@ public class User implements UserDetails {
     @Builder.Default
     private boolean active = true;
 
-    @OneToOne(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
-    private UserPreference preference;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

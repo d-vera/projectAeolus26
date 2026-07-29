@@ -5,11 +5,8 @@ import com.airproject.airproject.dto.LoginRequest;
 import com.airproject.airproject.dto.RegisterRequest;
 import com.airproject.airproject.exception.EmailAlreadyExistsException;
 import com.airproject.airproject.exception.InvalidCredentialsException;
-import com.airproject.airproject.model.Language;
 import com.airproject.airproject.model.Role;
-import com.airproject.airproject.model.Theme;
 import com.airproject.airproject.model.User;
-import com.airproject.airproject.model.UserPreference;
 import com.airproject.airproject.repository.UserRepository;
 import com.airproject.airproject.security.JwtTokenProvider;
 import com.airproject.airproject.security.TokenBlacklist;
@@ -48,15 +45,7 @@ public class AuthService {
                 .active(true)
                 .build();
 
-        User savedUser = userRepository.save(user);
-
-        UserPreference preference = UserPreference.builder()
-                .user(savedUser)
-                .language(Language.ES)
-                .theme(Theme.SYSTEM)
-                .build();
-        savedUser.setPreference(preference);
-        userRepository.save(savedUser);
+        userRepository.save(user);
 
         String token = tokenProvider.generateToken(user.getEmail(), user.getRole());
 

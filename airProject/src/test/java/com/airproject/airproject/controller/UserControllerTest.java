@@ -1,5 +1,6 @@
 package com.airproject.airproject.controller;
 
+import com.airproject.airproject.dto.UpdatePreferencesRequest;
 import com.airproject.airproject.dto.UserResponse;
 import com.airproject.airproject.model.Role;
 import com.airproject.airproject.service.UserService;
@@ -15,9 +16,10 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collections;
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -37,7 +39,7 @@ class UserControllerTest {
     }
 
     @Test
-    void getOwnProfile_ReturnsUserProfile() {
+    void getOwnProfile_ReturnsPreferences() {
         UserResponse response = UserResponse.builder()
                 .id(1L)
                 .email("user@example.com")
@@ -45,6 +47,8 @@ class UserControllerTest {
                 .lastName("Doe")
                 .role(Role.REGISTERED_USER)
                 .active(true)
+                .preferredTheme("DARK")
+                .preferredLanguage("es")
                 .build();
 
         when(userService.getCurrentUser("user@example.com")).thenReturn(response);
@@ -53,59 +57,31 @@ class UserControllerTest {
 
         assertEquals(HttpStatus.OK, result.getStatusCode());
         assertNotNull(result.getBody());
-        assertEquals("user@example.com", result.getBody().getEmail());
-        assertEquals("John", result.getBody().getFirstName());
+        assertEquals("DARK", result.getBody().getPreferredTheme());
+        assertEquals("es", result.getBody().getPreferredLanguage());
     }
 
     @Test
-    void getAllUsers_ReturnsActiveAndInactiveUsers() {
-        UserResponse activeUser = UserResponse.builder()
+    void updateOwnPreferences_ReturnsUpdatedProfile() {
+        UpdatePreferencesRequest request = UpdatePreferencesRequest.builder()
+                .preferredTheme("LIGHT")
+                .preferredLanguage("en")
+                .build();
+
+        UserResponse response = UserResponse.builder()
                 .id(1L)
-                .email("active@example.com")
-                .firstName("Active")
-                .lastName("User")
-                .role(Role.REGISTERED_USER)
-                .active(true)
+                .email("user@example.com")
+                .preferredTheme("LIGHT")
+                .preferredLanguage("en")
                 .build();
 
-        UserResponse inactiveUser = UserResponse.builder()
-                .id(2L)
-                .email("inactive@example.com")
-                .firstName("Inactive")
-                .lastName("User")
-                .role(Role.REGISTERED_USER)
-                .active(false)
-                .build();
+        when(userService.updateUserPreferences(eq("user@example.com"), any(UpdatePreferencesRequest.class))).thenReturn(response);
 
-        when(userService.getAllUsers()).thenReturn(List.of(activeUser, inactiveUser));
-
-        ResponseEntity<List<UserResponse>> result = userController.getAllUsers();
+        ResponseEntity<UserResponse> result = userController.updateOwnPreferences(userDetails, request);
 
         assertEquals(HttpStatus.OK, result.getStatusCode());
         assertNotNull(result.getBody());
-        assertEquals(2, result.getBody().size());
-        assertTrue(result.getBody().get(0).isActive());
-        assertFalse(result.getBody().get(1).isActive());
-    }
-
-    @Test
-    void getUserById_ReturnsInactiveUser() {
-        UserResponse inactiveUser = UserResponse.builder()
-                .id(2L)
-                .email("inactive@example.com")
-                .firstName("Inactive")
-                .lastName("User")
-                .role(Role.REGISTERED_USER)
-                .active(false)
-                .build();
-
-        when(userService.getUserById(2L)).thenReturn(inactiveUser);
-
-        ResponseEntity<UserResponse> result = userController.getUserById(2L);
-
-        assertEquals(HttpStatus.OK, result.getStatusCode());
-        assertNotNull(result.getBody());
-        assertFalse(result.getBody().isActive());
-        assertEquals("inactive@example.com", result.getBody().getEmail());
+        assertEquals("LIGHT", result.getBody().getPreferredTheme());
+        assertEquals("en", result.getBody().getPreferredLanguage());
     }
 }

@@ -20,4 +20,7 @@ public class UpdatePreferenceRequest {
 
     @Schema(description = "UI theme mode (DARK, LIGHT, or SYSTEM)", example = "SYSTEM", defaultValue = "SYSTEM")
     private Theme theme;
+
+    @Schema(description = "Active preference status flag", example = "true")
+    private Boolean active;
 }

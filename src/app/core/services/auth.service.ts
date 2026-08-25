@@ -89,6 +89,9 @@ export class AuthService {
         }
       },
       error: (err) => {
+        if (err?.status === 401 || err?.status === 403) {
+          this.clearAuthData();
+        }
         console.warn('Failed to load user preferences from backend:', err);
       }
     });

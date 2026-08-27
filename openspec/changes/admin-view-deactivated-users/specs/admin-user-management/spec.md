@@ -32,3 +32,8 @@ The system SHALL provide actions to soft-delete (deactivate) an active user via 
 
 ### Requirement: UpdateUserRequest model alignment
 The frontend `UpdateUserRequest` TypeScript interface SHALL include an optional `active: boolean` field to match the backend API contract for `PUT /api/users/{id}`.
+
+#### Scenario: Interface supports active status payload
+- **WHEN** components or services prepare a payload for updating a user's active state
+- **THEN** the `UpdateUserRequest` interface permits `{ active: boolean }` without TypeScript compilation errors
+

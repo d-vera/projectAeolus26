@@ -128,6 +128,51 @@
       "CANCEL_BTN": "Cancel"
     }
   },
+  "STOPLIGHT": {
+    "GREEN_TITLE": "Air Quality OK",
+    "GREEN_SUBTITLE": "All parameters are within safe ranges",
+    "YELLOW_TITLE": "Moderate Air Quality",
+    "YELLOW_SUBTITLE": "{{count}} parameter(s) at warning levels",
+    "ORANGE_TITLE": "Poor Air Quality — Take Precautions",
+    "ORANGE_SUBTITLE": "{{count}} parameter(s) at unhealthy levels",
+    "RED_TITLE": "Health Alert — Critical Air Quality",
+    "RED_SUBTITLE": "{{count}} parameter(s) exceeded critical thresholds",
+    "THRESHOLD_LABEL": "Threshold:",
+    "PARAMS": {
+      "PM2_5": "PM 2.5",
+      "PM10": "PM 10",
+      "PM1_0": "PM 1.0",
+      "CO2": "CO₂",
+      "TEMPERATURE": "Temperature",
+      "HUMIDITY": "Humidity"
+    },
+    "HEALTH": {
+      "PM2_5_YELLOW": "Mild respiratory tract irritation and subtle reduction in lung function, especially in sensitive individuals (asthma, children, elderly)",
+      "PM2_5_ORANGE": "Airway inflammation, aggravated asthma attacks, coughing, wheezing, and increased cardiovascular strain in vulnerable groups",
+      "PM2_5_RED": "Aggravated asthma, respiratory inflammation, increased cardiovascular risk, potential lung damage with prolonged exposure",
+      "PM10_YELLOW": "Upper respiratory tract irritation, mucous membrane dryness, and mild coughing in sensitive individuals",
+      "PM10_ORANGE": "Bronchial irritation, increased airway resistance, exacerbation of asthma, and worsening bronchitis symptoms",
+      "PM10_RED": "Upper airway irritation, bronchitis symptoms, reduced lung function",
+      "PM1_0_YELLOW": "Early alveolar deposition causing mild cellular oxidative stress and subtle airway discomfort in susceptible individuals",
+      "PM1_0_ORANGE": "Systemic oxidative stress, microvascular inflammation, increased cardiovascular strain, and worsening pulmonary conditions",
+      "PM1_0_RED": "Deep lung penetration, particles enter bloodstream, systemic inflammation risk",
+      "CO2_YELLOW": "Mild mental fatigue, reduced concentration, stuffiness, and subtle cognitive slowdown",
+      "CO2_ORANGE": "Headaches, drowsiness, impaired cognitive performance, sluggish decision-making, and increased heart rate",
+      "CO2_RED": "Drowsiness, headaches, impaired decision-making, dizziness — ventilate the area immediately",
+      "TEMP_HIGH_YELLOW": "Thermal discomfort, mild dehydration risk, reduced alertness, and increased sweating",
+      "TEMP_LOW_YELLOW": "Mild cold discomfort, peripheral vasoconstriction (reduced blood flow to extremities), and slight increase in blood pressure",
+      "TEMP_HIGH_ORANGE": "Elevated cardiovascular strain, risk of heat cramps, heavy fatigue, and thermoregulatory stress in vulnerable populations",
+      "TEMP_LOW_ORANGE": "Cold-induced airway constriction, elevated blood pressure, cardiovascular stress, and increased risk of bronchospasms",
+      "TEMP_HIGH_RED": "Risk of heat exhaustion or heat stroke — unsafe for prolonged indoor activity",
+      "TEMP_LOW_RED": "Risk of hypothermia — unsafe for prolonged exposure without heating",
+      "HUMIDITY_HIGH_YELLOW": "Increased perspiration discomfort, dust mite proliferation, and mild allergy or sinus symptoms",
+      "HUMIDITY_LOW_YELLOW": "Mild dryness of eyes, skin dryness, and mucous membrane irritation",
+      "HUMIDITY_HIGH_ORANGE": "Accelerated mold and fungal spore growth, triggering allergic rhinitis, respiratory tract infections, and worsening asthma",
+      "HUMIDITY_LOW_ORANGE": "Significant mucous membrane dehydration, impaired respiratory barrier, and heightened susceptibility to viral infections",
+      "HUMIDITY_HIGH_RED": "Promotes mold growth and dust mites — respiratory and allergy risks",
+      "HUMIDITY_LOW_RED": "Causes dry skin, eye irritation, and respiratory tract inflammation"
+    }
+  },
   "COMMON": {
     "LOADING": "Loading...",
     "SUCCESS": "Success",

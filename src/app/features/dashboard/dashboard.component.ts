@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
+import { Component, computed, inject, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { TranslatePipe } from '@ngx-translate/core';
@@ -14,6 +14,7 @@ import {
 import { SensorService } from '../../core/services/sensor.service';
 import { Sensor } from '../../models/sensor.model';
 import { RealTimeCardsComponent } from './components/real-time-cards/real-time-cards.component';
+import { StoplightIndicatorComponent } from './components/stoplight-indicator/stoplight-indicator.component';
 import { HistoricalChartComponent } from './components/historical-chart/historical-chart.component';
 import { LoginPromptModalComponent } from '../../shared/components/login-prompt-modal/login-prompt-modal.component';
 import { SensorMapComponent } from '../../shared/components/sensor-map/sensor-map.component';
@@ -26,6 +27,7 @@ import { SensorMapComponent } from '../../shared/components/sensor-map/sensor-ma
     RouterModule,
     TranslatePipe,
     RealTimeCardsComponent,
+    StoplightIndicatorComponent,
     HistoricalChartComponent,
     LoginPromptModalComponent,
     SensorMapComponent
@@ -65,6 +67,13 @@ import { SensorMapComponent } from '../../shared/components/sensor-map/sensor-ma
         [selectedDeviceId]="selectedDeviceId()"
         (selectedDeviceIdChange)="onDeviceChange($event)"
       ></app-real-time-cards>
+
+      <!-- Air Quality Stoplight Indicator -->
+      @if (currentReadings().length > 0) {
+        <app-stoplight-indicator
+          [reading]="selectedReading()"
+        ></app-stoplight-indicator>
+      }
 
       <!-- Active Sensor Stations Map Section -->
       <div class="space-y-4">
@@ -185,6 +194,17 @@ export class DashboardComponent implements OnInit {
   selectedDeviceId = signal<string>('');
   activeShortcut = signal<TimeRangeShortcut>('24h');
   showAuthModal = signal<boolean>(false);
+
+  /** The single reading used by the stoplight indicator */
+  selectedReading = computed<AirQualityReading | null>(() => {
+    const readings = this.currentReadings();
+    const deviceId = this.selectedDeviceId();
+    if (readings.length === 0) return null;
+    if (deviceId) {
+      return readings.find(r => r.deviceId === deviceId) || readings[0];
+    }
+    return readings[0];
+  });
 
   ngOnInit(): void {
     if (this.authService.isAuthenticated()) {

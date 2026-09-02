@@ -128,6 +128,51 @@
       "CANCEL_BTN": "Cancelar"
     }
   },
+  "STOPLIGHT": {
+    "GREEN_TITLE": "Calidad del Aire OK",
+    "GREEN_SUBTITLE": "Todos los parámetros están dentro de rangos seguros",
+    "YELLOW_TITLE": "Calidad del Aire Moderada",
+    "YELLOW_SUBTITLE": "{{count}} parámetro(s) en niveles de advertencia",
+    "ORANGE_TITLE": "Calidad del Aire Deficiente — Tome Precauciones",
+    "ORANGE_SUBTITLE": "{{count}} parámetro(s) en niveles no saludables",
+    "RED_TITLE": "Alerta de Salud — Calidad del Aire Crítica",
+    "RED_SUBTITLE": "{{count}} parámetro(s) superaron los umbrales críticos",
+    "THRESHOLD_LABEL": "Umbral:",
+    "PARAMS": {
+      "PM2_5": "PM 2.5",
+      "PM10": "PM 10",
+      "PM1_0": "PM 1.0",
+      "CO2": "CO₂",
+      "TEMPERATURE": "Temperatura",
+      "HUMIDITY": "Humedad"
+    },
+    "HEALTH": {
+      "PM2_5_YELLOW": "Irritación leve de las vías respiratorias y reducción sutil de la función pulmonar, especialmente en personas sensibles (asma, niños, adultos mayores)",
+      "PM2_5_ORANGE": "Inflamación de las vías respiratorias, ataques de asma agravados, tos, sibilancias y mayor esfuerzo cardiovascular en grupos vulnerables",
+      "PM2_5_RED": "Asma agravada, inflamación respiratoria, mayor riesgo cardiovascular y potencial daño pulmonar con exposición prolongada",
+      "PM10_YELLOW": "Irritación de las vías respiratorias superiores, sequedad de membranas mucosas y tos leve en personas sensibles",
+      "PM10_ORANGE": "Irritación bronquial, aumento de la resistencia respiratoria, exacerbación del asma y empeoramiento de síntomas de bronquitis",
+      "PM10_RED": "Irritación de vías respiratorias superiores, síntomas de bronquitis y reducción de la función pulmonar",
+      "PM1_0_YELLOW": "Deposición alveolar temprana que causa estrés oxidativo celular leve y molestia respiratoria sutil en personas susceptibles",
+      "PM1_0_ORANGE": "Estrés oxidativo sistémico, inflamación microvascular, mayor esfuerzo cardiovascular y empeoramiento de afecciones pulmonares",
+      "PM1_0_RED": "Penetración pulmonar profunda, partículas ingresan al torrente sanguíneo, riesgo de inflamación sistémica",
+      "CO2_YELLOW": "Fatiga mental leve, reducción de la concentración, sensación de encierro y ralentización cognitiva sutil",
+      "CO2_ORANGE": "Dolores de cabeza, somnolencia, deterioro del rendimiento cognitivo, lentitud en la toma de decisiones y aumento del ritmo cardíaco",
+      "CO2_RED": "Somnolencia, dolores de cabeza, alteración de la toma de decisiones, mareos — ventile el área de inmediato",
+      "TEMP_HIGH_YELLOW": "Incomodidad térmica, riesgo leve de deshidratación, menor nivel de alerta y aumento de la sudoración",
+      "TEMP_LOW_YELLOW": "Incomodidad por frío leve, vasoconstricción periférica (menor flujo sanguíneo a extremidades) y ligero aumento de la presión arterial",
+      "TEMP_HIGH_ORANGE": "Mayor esfuerzo cardiovascular, riesgo de calambres por calor, fatiga intensa y estrés termorregulador en poblaciones vulnerables",
+      "TEMP_LOW_ORANGE": "Constricción de vías respiratorias inducida por el frío, aumento de la presión arterial, estrés cardiovascular y mayor riesgo de broncoespasmos",
+      "TEMP_HIGH_RED": "Riesgo de agotamiento o golpe de calor — no apto para actividad prolongada en interiores",
+      "TEMP_LOW_RED": "Riesgo de hipotermia — no apto para exposición prolongada sin calefacción",
+      "HUMIDITY_HIGH_YELLOW": "Mayor incomodidad por transpiración, proliferación de ácaros del polvo y síntomas leves de alergia o sinusitis",
+      "HUMIDITY_LOW_YELLOW": "Sequedad leve en los ojos, sequedad de la piel e irritación de las membranas mucosas",
+      "HUMIDITY_HIGH_ORANGE": "Crecimiento acelerado de moho y esporas fúngicas, desencadenando rinitis alérgica, infecciones respiratorias y empeoramiento del asma",
+      "HUMIDITY_LOW_ORANGE": "Deshidratación significativa de membranas mucosas, deterioro de la barrera respiratoria y mayor susceptibilidad a infecciones virales",
+      "HUMIDITY_HIGH_RED": "Favorece el crecimiento de moho y ácaros del polvo — riesgos respiratorios y de alergias",
+      "HUMIDITY_LOW_RED": "Provoca resequedad en la piel, irritación ocular e inflamación del tracto respiratorio"
+    }
+  },
   "COMMON": {
     "LOADING": "Cargando...",
     "SUCCESS": "Éxito",

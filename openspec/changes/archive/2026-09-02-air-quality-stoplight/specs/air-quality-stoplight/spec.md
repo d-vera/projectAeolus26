@@ -96,6 +96,10 @@ For each parameter outside optimal green ranges, the system SHALL display a heal
 ### Requirement: Stoplight is positioned below real-time data cards
 The stoplight indicator component SHALL be rendered in the dashboard layout immediately after the real-time air quality cards section and before the sensor station map section.
 
+#### Scenario: Stoplight placement in dashboard
+- **WHEN** the dashboard page loads with sensor data
+- **THEN** the stoplight indicator SHALL appear between the real-time metric cards and the sensor station map
+
 ---
 
 ### Requirement: Stoplight visual presentation and animations
@@ -104,3 +108,13 @@ The stoplight component SHALL display a 3-light vertical housing (red, yellow/or
 - **Orange state**: Active orange middle light with static warm glow, orange background container
 - **Yellow state**: Active yellow middle light, yellow background container
 - **Green state**: Active green light, calm green background container
+
+#### Scenario: Visual presentation across severity states
+- **WHEN** the stoplight is in the red state
+- **THEN** the top red light is active with a pulsing glow animation
+- **WHEN** the stoplight is in the orange state
+- **THEN** the middle light displays orange with a static warm glow
+- **WHEN** the stoplight is in the yellow state
+- **THEN** the middle light displays yellow
+- **WHEN** the stoplight is in the green state
+- **THEN** the bottom light displays green with a calm background

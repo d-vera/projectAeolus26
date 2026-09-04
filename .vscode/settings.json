@@ -1,0 +1,7 @@
+{
+  "java.project.sourcePaths": [
+    "airProject/src/main/java",
+    "airProject/src/test/java"
+  ],
+  "java.import.maven.enabled": true
+}

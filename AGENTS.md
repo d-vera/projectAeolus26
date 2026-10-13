@@ -2,12 +2,12 @@
 
 ## Mandatory Testing on Every Change
 
-**Any time code is modified, added, or deleted in the backend (`airProject/` directory), the agent MUST run the full test suite before considering the task complete.**
+**Any time code is modified, added, or deleted in the backend (`air_project_backend_team_26/` directory), the agent MUST run the full test suite before considering the task complete.**
 
 ### How to Run Tests
 
 ```bash
-cd airProject && ./mvnw test
+cd air_project_backend_team_26 && ./mvnw test
 ```
 
 - If tests **pass** → proceed normally.

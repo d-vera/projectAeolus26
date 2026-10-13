@@ -1,7 +1,7 @@
 {
   "java.project.sourcePaths": [
-    "airProject/src/main/java",
-    "airProject/src/test/java"
+    "air_project_backend_team_26/src/main/java",
+    "air_project_backend_team_26/src/test/java"
   ],
   "java.import.maven.enabled": true
 }
